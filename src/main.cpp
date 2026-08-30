@@ -1,4 +1,6 @@
 #include <iostream>
+#include <set>
+#include <vector>
 
 enum class PollStatus
 {
@@ -222,24 +224,29 @@ private:
 int main()
 {
 
-    auto incFuture = std::make_unique<IncrementFuture>(10, 0);
-    auto DecFuture = std::make_unique<DecrementFuture>(0, 10);
+    auto incFuture = new IncrementFuture(10, 0);
+
+    incFuture->Then<DecrementFuture>([](int data)
+                                     {
+        std::cerr <<"Incerement future Counter value reached " << std::endl;
+        auto fut =  new DecrementFuture(0, data); 
+        return fut; });
 
     std::cerr << "Futures registered with runtime = " << runtime.size() << std::endl;
-    while (!runtime.empty())
+    std::set<int> removedIndecies;
+    while (removedIndecies.size() < runtime.size())
     {
-        for (auto it = runtime.begin(); it != runtime.end();)
+        for (int i = 0.; i < runtime.size(); ++i)
         {
-            auto &ptr = *it;
-            auto pollResult = ptr->Poll();
+            if (removedIndecies.find(i) != removedIndecies.end())
+            {
+                continue;
+            }
+            auto pollResult = runtime[i]->Poll();
             if (pollResult == PollStatus::Finished || pollResult == PollStatus::Error)
             {
                 std::cerr << "future removed " << std::endl;
-                it = runtime.erase(it);
-            }
-            else
-            {
-                ++it;
+                removedIndecies.insert(i);
             }
         }
     }
