@@ -7,11 +7,69 @@ enum class PollStatus
     Error,
 };
 
+class IFuture;
+std::vector<IFuture *> runtime;
+
 class IFuture
 {
 public:
+    IFuture()
+    {
+        runtime.push_back(this);
+    };
+
     virtual PollStatus Poll() = 0;
     virtual ~IFuture() = default;
+    void SetContinuation(std::function<void(void)> cb)
+    {
+        m_continuation = std::move(cb);
+    }
+
+protected:
+    std::function<void(void)> m_continuation;
+};
+
+template <typename BoundFutureType>
+class FutureHandle
+{
+public:
+    template <typename NextFutureType>
+    FutureHandle<NextFutureType> *Then(std::function<NextFutureType *(typename BoundFutureType::DataType)> callback)
+    {
+        if (boundFut)
+        {
+            return boundFut->Then(std::move(callback));
+        }
+        auto handle = new FutureHandle<NextFutureType>;
+        continuation = [cb = std::move(callback), this, handle]()
+        {
+            if (boundFut == nullptr)
+            {
+                throw std::runtime_error("[FATAL]: future handle not bound in continuation cb");
+            }
+            typename BoundFutureType::DataType data = boundFut->GetData();
+            auto nextFut = cb(data);
+            handle->Bind(nextFut);
+        };
+        return handle;
+    }
+
+    void Bind(BoundFutureType *fut)
+    {
+        if (boundFut != nullptr)
+        {
+            throw std::runtime_error("[FATAL]: bound twice");
+        }
+        boundFut = fut;
+        if (continuation)
+        {
+            boundFut->SetContinuation(std::move(continuation));
+        }
+    }
+
+private:
+    BoundFutureType *boundFut{nullptr};
+    std::function<void(void)> continuation;
 };
 
 class ThenFuture : public IFuture
@@ -66,6 +124,8 @@ private:
 class IncrementFuture : public IFuture
 {
 public:
+    using DataType = int;
+
     IncrementFuture(int n, int i) : maxIterations(n),
                                     currentIteration(i)
     {
@@ -83,7 +143,26 @@ public:
             ++currentIteration;
             return PollStatus::Pending;
         }
+        if (m_continuation)
+            m_continuation();
         return PollStatus::Finished;
+    }
+
+    template <typename NextFutureType>
+    FutureHandle<NextFutureType> *Then(std::function<NextFutureType *(DataType)> callback)
+    {
+        auto handle = new FutureHandle<NextFutureType>;
+        m_continuation = [cb = std::move(callback), this, handle]()
+        {
+            auto nextFut = cb(currentIteration);
+            handle->Bind(nextFut);
+        };
+        return handle;
+    }
+
+    DataType GetData()
+    {
+        return currentIteration;
     }
 
 private:
@@ -94,6 +173,8 @@ private:
 class DecrementFuture : public IFuture
 {
 public:
+    using DataType = int;
+
     DecrementFuture(int n, int i) : minIterations(n),
                                     currentIteration(i)
     {
@@ -111,7 +192,26 @@ public:
             --currentIteration;
             return PollStatus::Pending;
         }
+        if (m_continuation)
+            m_continuation();
         return PollStatus::Finished;
+    }
+
+    template <typename NextFutureType>
+    FutureHandle<NextFutureType> *Then(std::function<NextFutureType *(DataType)> callback)
+    {
+        auto handle = new FutureHandle<NextFutureType>;
+        m_continuation = [cb = std::move(callback), this, handle]()
+        {
+            auto nextFut = cb(currentIteration);
+            handle->Bind(nextFut);
+        };
+        return handle;
+    }
+
+    DataType GetData()
+    {
+        return currentIteration;
     }
 
 private:
@@ -121,26 +221,21 @@ private:
 
 int main()
 {
-    std::vector<std::unique_ptr<IFuture>> vecFutures;
+
     auto incFuture = std::make_unique<IncrementFuture>(10, 0);
     auto DecFuture = std::make_unique<DecrementFuture>(0, 10);
 
-    // vecFutures.push_back(std::move(DecFuture));
-    // vecFutures.push_back(std::move(DecFuture));
-
-    auto thenFuture = std::make_unique<ThenFuture>(incFuture.release(), DecFuture.release());
-
-    vecFutures.push_back(std::move(thenFuture));
-
-    while (!vecFutures.empty())
+    std::cerr << "Futures registered with runtime = " << runtime.size() << std::endl;
+    while (!runtime.empty())
     {
-        for (auto it = vecFutures.begin(); it != vecFutures.end();)
+        for (auto it = runtime.begin(); it != runtime.end();)
         {
             auto &ptr = *it;
             auto pollResult = ptr->Poll();
             if (pollResult == PollStatus::Finished || pollResult == PollStatus::Error)
             {
-                it = vecFutures.erase(it);
+                std::cerr << "future removed " << std::endl;
+                it = runtime.erase(it);
             }
             else
             {

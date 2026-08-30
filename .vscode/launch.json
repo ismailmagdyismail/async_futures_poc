@@ -1,0 +1,16 @@
+{
+  "configurations": [
+    {
+      "name": "futures",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/async_futures.exe",
+      "args": [],
+      "stopAtEntry": true,
+      "cwd": "${fileDirname}",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "lldb"
+    }
+  ]
+}
