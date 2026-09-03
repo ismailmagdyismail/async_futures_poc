@@ -1,6 +1,11 @@
 #include <iostream>
 #include <set>
 #include <vector>
+#include <functional>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <arpa/inet.h>
 
 enum class PollStatus
 {
@@ -221,8 +226,99 @@ private:
     int currentIteration;
 };
 
+struct SocketInfo
+{
+    int fd;
+};
+
+class SocketAcceptFuture : public IFuture
+{
+public:
+    using DataType = SocketInfo *;
+
+    SocketAcceptFuture(SocketInfo *pSocketInfo) : m_pSocketInfo(pSocketInfo)
+    {
+    }
+
+    PollStatus Poll() override
+    {
+        int clientFd = accept(m_pSocketInfo->fd, nullptr, nullptr);
+        if (clientFd == -1)
+        {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+                return PollStatus::Pending;
+            }
+            else
+            {
+                std::cerr << "Error accepting socket: with code " << errno << " and message: " << strerror(errno) << std::endl;
+                return PollStatus::Error;
+            }
+        }
+        else
+        {
+            std::cerr << "Accepted new client connection, fd: " << clientFd << std::endl;
+            m_pCreatedClientSocketInfo = new SocketInfo{clientFd};
+            if (m_continuation)
+                m_continuation();
+            return PollStatus::Finished;
+        }
+    }
+
+    template <typename NextFutureType>
+    FutureHandle<NextFutureType> *Then(std::function<NextFutureType *(DataType)> callback)
+    {
+        auto handle = new FutureHandle<NextFutureType>;
+        m_continuation = [cb = std::move(callback), this, handle]()
+        {
+            if (m_pCreatedClientSocketInfo == nullptr || m_pCreatedClientSocketInfo->fd == 0)
+            {
+                throw std::runtime_error("[FATAL]: socket accept future continuation called before socket was accepted");
+            }
+            auto nextFut = cb(m_pCreatedClientSocketInfo);
+            handle->Bind(nextFut);
+        };
+        return handle;
+    }
+
+    DataType GetData()
+    {
+        return m_pCreatedClientSocketInfo;
+    }
+
+private:
+    SocketInfo *m_pSocketInfo;
+    SocketInfo *m_pCreatedClientSocketInfo{nullptr};
+};
+
 int main()
 {
+    int serverFD = socket(AF_INET, SOCK_STREAM, 0);
+    fcntl(serverFD, F_SETFL, O_NONBLOCK);
+    sockaddr_in address;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(8080);
+    address.sin_family = AF_INET;
+
+    int bindStatus = bind(serverFD, reinterpret_cast<sockaddr *>(&address), sizeof(address));
+    if (bindStatus == -1)
+    {
+        std::cerr << "Error binding socket: with code " << errno << " and message: " << strerror(errno) << std::endl;
+        return 1;
+    }
+    int listenStatus = listen(serverFD, 0);
+    if (listenStatus != 0)
+    {
+        std::cerr << "Error Listening on Server Socket with port 8080" << std::endl;
+        return 1;
+    }
+
+    SocketAcceptFuture *acceptFuture = new SocketAcceptFuture(new SocketInfo{serverFD});
+
+    acceptFuture->Then<IncrementFuture>([](SocketInfo *clientSocketInfo)
+                                        {
+        std::cerr << "Socket accepted, fd: " << clientSocketInfo->fd << std::endl;
+        return new IncrementFuture(5, 0); });
 
     auto incFuture = new IncrementFuture(10, 0);
 
@@ -236,7 +332,7 @@ int main()
     std::set<int> removedIndecies;
     while (removedIndecies.size() < runtime.size())
     {
-        for (int i = 0.; i < runtime.size(); ++i)
+        for (unsigned int i = 0; i < runtime.size(); ++i)
         {
             if (removedIndecies.find(i) != removedIndecies.end())
             {
