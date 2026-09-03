@@ -291,6 +291,70 @@ private:
     SocketInfo *m_pCreatedClientSocketInfo{nullptr};
 };
 
+class SocketReadFuture : public IFuture
+{
+public:
+    SocketReadFuture(unsigned int bufferSize, SocketInfo *pSocketInfo) : m_pSocketInfo(pSocketInfo)
+    {
+        m_readResult.buffer = new char[bufferSize];
+        m_bufferSize = bufferSize;
+    }
+    struct ReadResult
+    {
+        int bytesRead;
+        char *buffer{nullptr};
+    };
+
+    using DataType = ReadResult;
+
+    PollStatus Poll() override
+    {
+        int iBytesRead = read(m_pSocketInfo->fd, m_readResult.buffer, m_bufferSize);
+        if (iBytesRead == -1)
+        {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+                return PollStatus::Pending;
+            }
+            else
+            {
+                std::cerr << "Error reading from socket: with code " << errno << " and message: " << strerror(errno) << std::endl;
+                return PollStatus::Error;
+            }
+        }
+        m_readResult.bytesRead = iBytesRead;
+        if (m_continuation)
+            m_continuation();
+        return PollStatus::Finished;
+    }
+
+    template <typename NextFutureType>
+    FutureHandle<NextFutureType> *Then(std::function<NextFutureType *(DataType)> callback)
+    {
+        auto handle = new FutureHandle<NextFutureType>;
+        m_continuation = [cb = std::move(callback), this, handle]()
+        {
+            if (m_readResult.buffer == nullptr)
+            {
+                throw std::runtime_error("[FATAL]: socket read future continuation called before socket was read");
+            }
+            auto nextFut = cb(m_readResult);
+            handle->Bind(nextFut);
+        };
+        return handle;
+    }
+
+    DataType GetData()
+    {
+        return m_readResult;
+    }
+
+private:
+    SocketInfo *m_pSocketInfo;
+    unsigned int m_bufferSize;
+    ReadResult m_readResult;
+};
+
 int main()
 {
     int serverFD = socket(AF_INET, SOCK_STREAM, 0);
@@ -315,18 +379,15 @@ int main()
 
     SocketAcceptFuture *acceptFuture = new SocketAcceptFuture(new SocketInfo{serverFD});
 
-    acceptFuture->Then<IncrementFuture>([](SocketInfo *clientSocketInfo)
-                                        {
+    acceptFuture->Then<SocketReadFuture>([](SocketInfo *clientSocketInfo)
+                                         {
         std::cerr << "Socket accepted, fd: " << clientSocketInfo->fd << std::endl;
-        return new IncrementFuture(5, 0); });
-
-    auto incFuture = new IncrementFuture(10, 0);
-
-    incFuture->Then<DecrementFuture>([](int data)
-                                     {
-        std::cerr <<"Incerement future Counter value reached " << std::endl;
-        auto fut =  new DecrementFuture(0, data); 
-        return fut; });
+        return new SocketReadFuture(1024, clientSocketInfo); })
+        ->Then<IncrementFuture>([](SocketReadFuture::ReadResult readResult)
+                                {
+        std::cerr << "Socket read completed, bytes read: " << readResult.bytesRead << std::endl;
+        std::cerr <<"Read bytes "<< std::string_view(readResult.buffer, readResult.bytesRead) << std::endl;
+        return new IncrementFuture(10, 0); });
 
     std::cerr << "Futures registered with runtime = " << runtime.size() << std::endl;
     std::set<int> removedIndecies;
