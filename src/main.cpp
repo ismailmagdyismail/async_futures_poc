@@ -83,7 +83,11 @@ template <typename FutureWrappedType>
 class Future : public IFuture
 {
 public:
-    Future(FutureWrappedType wrappedFuture) : m_oWrappedFuture(wrappedFuture)
+    //! Emplace like API
+    //! to avoid copying or un-necessary pointers, heap allocations
+    template <typename... Args>
+    explicit Future(std::in_place_t, Args &&...args)
+        : m_oWrappedFuture(std::forward<Args>(args)...)
     {
     }
 
@@ -321,27 +325,27 @@ int main()
         return 1;
     }
 
-    Future<SocketAcceptFuture> *acceptFuture = new Future<SocketAcceptFuture>(SocketAcceptFuture(new SocketInfo{serverFD}));
+    Future<SocketAcceptFuture> *acceptFuture = new Future<SocketAcceptFuture>(std::in_place, new SocketInfo{serverFD});
 
     acceptFuture->Then<Future<SocketReadFuture>>([](SocketInfo *clientSocketInfo)
                                                  {
         std::cerr << "Socket accepted, fd: " << clientSocketInfo->fd << std::endl;
-        return new Future<SocketReadFuture>(SocketReadFuture(1024, clientSocketInfo)); })
+        return new Future<SocketReadFuture>(std::in_place, 1024, clientSocketInfo); })
         ->Then<Future<DoneFuture>>([](SocketReadFuture::ReadResult readResult)
                                    {
         std::cerr << "Socket read completed, bytes read: " << readResult.bytesRead << std::endl;
         std::cerr <<"Read bytes "<< std::string_view(readResult.buffer, readResult.bytesRead) << std::endl;
-        return new Future<DoneFuture>(DoneFuture()); });
+        return new Future<DoneFuture>(std::in_place); });
 
-    Future<DecrementFuture> *decrementFuture = new Future<DecrementFuture>(DecrementFuture(0, 10));
-    Future<IncrementFuture> *incrementFuture2 = new Future<IncrementFuture>(IncrementFuture(10, 0));
+    Future<DecrementFuture> *decrementFuture = new Future<DecrementFuture>(std::in_place, 0, 10);
+    Future<IncrementFuture> *incrementFuture2 = new Future<IncrementFuture>(std::in_place, 10, 0);
 
     decrementFuture->Then<Future<DoneFuture>>([](DecrementFuture::DataType value)
                                               { std::cerr << " Decrement future completed with value: " << value << std::endl;
-                        return new Future<DoneFuture>(DoneFuture()); });
+                        return new Future<DoneFuture>(std::in_place); });
     incrementFuture2->Then<Future<DoneFuture>>([](IncrementFuture::DataType value)
                                                { std::cerr << " Increment future completed with value: " << value << std::endl;
-                        return new Future<DoneFuture>(DoneFuture()); });
+                        return new Future<DoneFuture>(std::in_place); });
 
     std::cerr << "Futures registered with runtime = " << runtime.size() << std::endl;
     std::set<int> removedIndecies;
