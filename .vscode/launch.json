@@ -1,6 +1,28 @@
 {
   "configurations": [
     {
+      "name": "Echo Server",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/examples/echo-server/server.exe",
+      "args": [],
+      "stopAtEntry": true,
+      "cwd": "${fileDirname}",
+      "externalConsole": false,
+      "MIMode": "lldb",
+      "environment": [
+        {
+          "name": "LD_LIBRARY_PATH",
+          "value": "${workspaceFolder}/src/:${env:LD_LIBRARY_PATH}"
+        },
+        {
+          "name": "DYLD_LIBRARY_PATH",
+          "value": "${workspaceFolder}/src/:${env:DYLD_LIBRARY_PATH}"
+        }
+      ],
+      "additionalSOLibSearchPath": "${workspaceFolder}/src/"
+    },
+    {
       "name": "futures",
       "type": "cppdbg",
       "request": "launch",
@@ -11,6 +33,7 @@
       "environment": [],
       "externalConsole": false,
       "MIMode": "lldb"
-    }
+    },
+    
   ]
 }

@@ -9,9 +9,9 @@
 class SocketReadFuture
 {
 public:
-    SocketReadFuture(unsigned int bufferSize, SocketInfo *pSocketInfo) : m_pSocketInfo(pSocketInfo)
+    SocketReadFuture(char* buffer, unsigned int bufferSize, SocketInfo *pSocketInfo) : m_pSocketInfo(pSocketInfo)
     {
-        m_readResult.buffer = new char[bufferSize];
+        m_readResult.buffer = buffer;
         m_bufferSize = bufferSize;
     }
     struct ReadResult
