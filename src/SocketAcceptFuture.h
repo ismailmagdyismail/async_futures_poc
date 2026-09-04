@@ -1,3 +1,4 @@
+#pragma once
 #include "IFuture.h"
 #include "Socket.h"
 
