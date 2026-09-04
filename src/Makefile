@@ -5,17 +5,17 @@ SRCS := $(wildcard *.cpp)
 OBJS := $(SRCS:.cpp=.o)
 DEPS := $(OBJS:.o=.d)
 
-TARGET := async_futures.exe
+TARGET := libasync_futures.so
 
 all: $(TARGET)
 
 $(TARGET): $(OBJS)
-	$(GCC) $(OBJS) $(LIBS) -o $(TARGET)
+	$(GCC) $(OBJS) $(SHARED_LIB_FLAGS) -o $(TARGET)
 
 %.o: %.cpp
 	$(GCC) $(CXX_FLAGS) $(INCLUDES) -c $< -o $@ -MP -MMD
 
 clean:
-	rm -rf *.o *.d $(TARGET)
+	rm -rf *.o *.d *.exe *.so *.a $(TARGET)
 
 -include $(DEPS)
