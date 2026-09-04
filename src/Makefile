@@ -13,7 +13,7 @@ $(TARGET): $(OBJS)
 	$(GCC) $(OBJS) $(LIBS) -o $(TARGET)
 
 %.o: %.cpp
-	$(GCC) $(CXX_FLAGS) $(INCLUDES) -c $< -o $@
+	$(GCC) $(CXX_FLAGS) $(INCLUDES) -c $< -o $@ -MP -MMD
 
 clean:
 	rm -rf *.o *.d $(TARGET)

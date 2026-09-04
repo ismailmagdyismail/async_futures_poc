@@ -1,5 +1,9 @@
 #pragma once
 
+//! System includes
+#include <type_traits>
+
+//! Future includes
 #include "IFuture.h"
 #include "FutureHandle.h"
 
@@ -30,15 +34,17 @@ public:
         return eStatus;
     }
 
-    template <typename NextFutureType>
-    FutureHandle<NextFutureType> *Then(std::function<NextFutureType *(DataType)> callback)
+    template <typename Callback>
+    auto Then(Callback &&callback)
     {
+        using NextFutureType = std::remove_pointer_t<std::invoke_result_t<Callback &, DataType>>;
         auto handle = new FutureHandle<NextFutureType>;
-        m_continuation = [cb = std::move(callback), this, handle]()
+        m_continuation =[cb = std::forward<Callback>(callback), this, handle]() mutable
         {
-            auto nextFut = cb(GetData());
+            auto nextFut = std::invoke(cb, GetData());
             handle->Bind(nextFut);
         };
+
         return handle;
     }
 

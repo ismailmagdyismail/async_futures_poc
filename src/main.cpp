@@ -40,10 +40,10 @@ int main()
 
     Future<SocketAcceptFuture> *acceptFuture = new Future<SocketAcceptFuture>(std::in_place, &runtime, new SocketInfo{serverFD});
     acceptFuture
-    ->Then<Future<SocketReadFuture>>([&](SocketInfo *info) { 
+    ->Then([&](SocketInfo *info) { 
         return new Future<SocketReadFuture>(std::in_place, &runtime, 1024, info);
     })
-    ->Then<Future<DoneFuture>>([&](SocketReadFuture::ReadResult readResult) {
+    ->Then([&](SocketReadFuture::ReadResult readResult) {
         std::cerr << "Socket read completed, bytes read: " << readResult.bytesRead << std::endl;
         std::cerr << "Read bytes: " << std::string_view(readResult.buffer, readResult.bytesRead) << std::endl;
         return new Future<DoneFuture>(std::in_place, &runtime);
@@ -51,15 +51,15 @@ int main()
 
     auto incFuture = new Future<IncrementFuture>(std::in_place, &runtime, 10, 0);
     incFuture
-    ->Then<Future<DoneFuture>>([&](IncrementFuture::DataType value){
+    ->Then([&](IncrementFuture::DataType value){
         std::cerr << " Increment future completed with value: " << value << std::endl;
         return new Future<DoneFuture>(std::in_place, &runtime); 
     })
-    ->Then<Future<DecrementFuture>>([&](DoneFuture::DataType value){
+    ->Then([&](DoneFuture::DataType value){
         std::cerr << " Done future completed with value: " << value << std::endl;
         return new Future<DecrementFuture>(std::in_place, &runtime, 0, 10); 
     })
-    ->Then<Future<DoneFuture>>([&](DecrementFuture::DataType value){
+    ->Then([&](DecrementFuture::DataType value){
         std::cerr << " Decrement future completed with value: " << value << std::endl;
         return new Future<DoneFuture>(std::in_place, &runtime);
     });

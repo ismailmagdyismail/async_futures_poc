@@ -1,27 +1,30 @@
 #pragma once
 
+//! System includes
+#include <type_traits>
 #include <functional>
 
 template <typename BoundFutureType>
 class FutureHandle
 {
 public:
-    template <typename NextFutureType>
-    FutureHandle<NextFutureType> *Then(std::function<NextFutureType *(typename BoundFutureType::DataType)> callback)
+    template <typename Callback>
+    auto Then(Callback &&callback)
     {
+        using NextFutureType = std::remove_pointer_t<std::invoke_result_t<Callback &, typename BoundFutureType::DataType>>;
         if (boundFut)
         {
-            return boundFut->Then(std::move(callback));
+            return boundFut->Then(std::forward<Callback>(callback));
         }
         auto handle = new FutureHandle<NextFutureType>;
-        continuation = [cb = std::move(callback), this, handle]()
+        continuation = [cb = std::forward<Callback>(callback), this, handle]() mutable
         {
             if (boundFut == nullptr)
             {
                 throw std::runtime_error("[FATAL]: future handle not bound in continuation cb");
             }
-            typename BoundFutureType::DataType data = boundFut->GetData();
-            auto nextFut = cb(data);
+            auto data = boundFut->GetData();
+            auto nextFut = std::invoke(cb, data);
             handle->Bind(nextFut);
         };
         return handle;
