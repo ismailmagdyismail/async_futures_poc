@@ -79,56 +79,51 @@ private:
     std::function<void(void)> continuation;
 };
 
-class ThenFuture : public IFuture
+template <typename FutureWrappedType>
+class Future : public IFuture
 {
 public:
-    ThenFuture(IFuture *prev, IFuture *next)
+    Future(FutureWrappedType wrappedFuture) : m_oWrappedFuture(wrappedFuture)
     {
-        if (prev == nullptr)
-        {
-            throw std::runtime_error("[FATAL]: previous future cannot be set to null when chaining futures.");
-        }
-        m_pPreviousFuture = prev;
-        m_pNextFuture = next;
     }
 
-    ThenFuture(const ThenFuture &) = delete;
-    ThenFuture(ThenFuture &&) = delete;
-    ThenFuture &operator=(const ThenFuture &) = delete;
-    ThenFuture &operator=(ThenFuture &&) = delete;
+    using DataType = typename FutureWrappedType::DataType;
 
     PollStatus Poll() override
     {
-        if (m_pPreviousFuture)
+        PollStatus eStatus = m_oWrappedFuture.Poll();
+        if (eStatus == PollStatus::Finished)
         {
-            PollStatus status = m_pPreviousFuture->Poll();
-            if (status == PollStatus::Finished)
+            if (m_continuation)
             {
-                m_pPreviousFuture = nullptr;
+                m_continuation();
             }
-            if (m_pNextFuture == nullptr)
-            {
-                return status;
-            }
-            return PollStatus::Pending;
         }
-        else if (m_pNextFuture)
+        return eStatus;
+    }
+
+    template <typename NextFutureType>
+    FutureHandle<NextFutureType> *Then(std::function<NextFutureType *(DataType)> callback)
+    {
+        auto handle = new FutureHandle<NextFutureType>;
+        m_continuation = [cb = std::move(callback), this, handle]()
         {
-            PollStatus status = m_pNextFuture->Poll();
-            return status;
-        }
-        else
-        {
-            return PollStatus::Finished;
-        }
+            auto nextFut = cb(GetData());
+            handle->Bind(nextFut);
+        };
+        return handle;
+    }
+
+    DataType GetData()
+    {
+        return m_oWrappedFuture.GetData();
     }
 
 private:
-    IFuture *m_pPreviousFuture;
-    IFuture *m_pNextFuture;
+    FutureWrappedType m_oWrappedFuture;
 };
 
-class IncrementFuture : public IFuture
+class IncrementFuture
 {
 public:
     using DataType = int;
@@ -142,7 +137,7 @@ public:
         }
     }
 
-    PollStatus Poll() override
+    PollStatus Poll()
     {
         if (currentIteration < maxIterations)
         {
@@ -150,21 +145,7 @@ public:
             ++currentIteration;
             return PollStatus::Pending;
         }
-        if (m_continuation)
-            m_continuation();
         return PollStatus::Finished;
-    }
-
-    template <typename NextFutureType>
-    FutureHandle<NextFutureType> *Then(std::function<NextFutureType *(DataType)> callback)
-    {
-        auto handle = new FutureHandle<NextFutureType>;
-        m_continuation = [cb = std::move(callback), this, handle]()
-        {
-            auto nextFut = cb(currentIteration);
-            handle->Bind(nextFut);
-        };
-        return handle;
     }
 
     DataType GetData()
@@ -177,7 +158,7 @@ private:
     int currentIteration;
 };
 
-class DecrementFuture : public IFuture
+class DecrementFuture
 {
 public:
     using DataType = int;
@@ -191,7 +172,7 @@ public:
         }
     }
 
-    PollStatus Poll() override
+    PollStatus Poll()
     {
         if (currentIteration > minIterations)
         {
@@ -199,21 +180,7 @@ public:
             --currentIteration;
             return PollStatus::Pending;
         }
-        if (m_continuation)
-            m_continuation();
         return PollStatus::Finished;
-    }
-
-    template <typename NextFutureType>
-    FutureHandle<NextFutureType> *Then(std::function<NextFutureType *(DataType)> callback)
-    {
-        auto handle = new FutureHandle<NextFutureType>;
-        m_continuation = [cb = std::move(callback), this, handle]()
-        {
-            auto nextFut = cb(currentIteration);
-            handle->Bind(nextFut);
-        };
-        return handle;
     }
 
     DataType GetData()
@@ -231,7 +198,7 @@ struct SocketInfo
     int fd;
 };
 
-class SocketAcceptFuture : public IFuture
+class SocketAcceptFuture
 {
 public:
     using DataType = SocketInfo *;
@@ -240,7 +207,7 @@ public:
     {
     }
 
-    PollStatus Poll() override
+    PollStatus Poll()
     {
         int clientFd = accept(m_pSocketInfo->fd, nullptr, nullptr);
         if (clientFd == -1)
@@ -251,34 +218,14 @@ public:
             }
             else
             {
-                std::cerr << "Error accepting socket: with code " << errno << " and message: " << strerror(errno) << std::endl;
                 return PollStatus::Error;
             }
         }
         else
         {
-            std::cerr << "Accepted new client connection, fd: " << clientFd << std::endl;
             m_pCreatedClientSocketInfo = new SocketInfo{clientFd};
-            if (m_continuation)
-                m_continuation();
             return PollStatus::Finished;
         }
-    }
-
-    template <typename NextFutureType>
-    FutureHandle<NextFutureType> *Then(std::function<NextFutureType *(DataType)> callback)
-    {
-        auto handle = new FutureHandle<NextFutureType>;
-        m_continuation = [cb = std::move(callback), this, handle]()
-        {
-            if (m_pCreatedClientSocketInfo == nullptr || m_pCreatedClientSocketInfo->fd == 0)
-            {
-                throw std::runtime_error("[FATAL]: socket accept future continuation called before socket was accepted");
-            }
-            auto nextFut = cb(m_pCreatedClientSocketInfo);
-            handle->Bind(nextFut);
-        };
-        return handle;
     }
 
     DataType GetData()
@@ -291,7 +238,7 @@ private:
     SocketInfo *m_pCreatedClientSocketInfo{nullptr};
 };
 
-class SocketReadFuture : public IFuture
+class SocketReadFuture
 {
 public:
     SocketReadFuture(unsigned int bufferSize, SocketInfo *pSocketInfo) : m_pSocketInfo(pSocketInfo)
@@ -307,7 +254,7 @@ public:
 
     using DataType = ReadResult;
 
-    PollStatus Poll() override
+    PollStatus Poll()
     {
         int iBytesRead = read(m_pSocketInfo->fd, m_readResult.buffer, m_bufferSize);
         if (iBytesRead == -1)
@@ -318,30 +265,11 @@ public:
             }
             else
             {
-                std::cerr << "Error reading from socket: with code " << errno << " and message: " << strerror(errno) << std::endl;
                 return PollStatus::Error;
             }
         }
         m_readResult.bytesRead = iBytesRead;
-        if (m_continuation)
-            m_continuation();
         return PollStatus::Finished;
-    }
-
-    template <typename NextFutureType>
-    FutureHandle<NextFutureType> *Then(std::function<NextFutureType *(DataType)> callback)
-    {
-        auto handle = new FutureHandle<NextFutureType>;
-        m_continuation = [cb = std::move(callback), this, handle]()
-        {
-            if (m_readResult.buffer == nullptr)
-            {
-                throw std::runtime_error("[FATAL]: socket read future continuation called before socket was read");
-            }
-            auto nextFut = cb(m_readResult);
-            handle->Bind(nextFut);
-        };
-        return handle;
     }
 
     DataType GetData()
@@ -353,6 +281,22 @@ private:
     SocketInfo *m_pSocketInfo;
     unsigned int m_bufferSize;
     ReadResult m_readResult;
+};
+
+class DoneFuture
+{
+public:
+    using DataType = bool;
+
+    PollStatus Poll()
+    {
+        return PollStatus::Finished;
+    }
+
+    bool GetData()
+    {
+        return true;
+    }
 };
 
 int main()
@@ -377,17 +321,27 @@ int main()
         return 1;
     }
 
-    SocketAcceptFuture *acceptFuture = new SocketAcceptFuture(new SocketInfo{serverFD});
+    Future<SocketAcceptFuture> *acceptFuture = new Future<SocketAcceptFuture>(SocketAcceptFuture(new SocketInfo{serverFD}));
 
-    acceptFuture->Then<SocketReadFuture>([](SocketInfo *clientSocketInfo)
-                                         {
+    acceptFuture->Then<Future<SocketReadFuture>>([](SocketInfo *clientSocketInfo)
+                                                 {
         std::cerr << "Socket accepted, fd: " << clientSocketInfo->fd << std::endl;
-        return new SocketReadFuture(1024, clientSocketInfo); })
-        ->Then<IncrementFuture>([](SocketReadFuture::ReadResult readResult)
-                                {
+        return new Future<SocketReadFuture>(SocketReadFuture(1024, clientSocketInfo)); })
+        ->Then<Future<DoneFuture>>([](SocketReadFuture::ReadResult readResult)
+                                   {
         std::cerr << "Socket read completed, bytes read: " << readResult.bytesRead << std::endl;
         std::cerr <<"Read bytes "<< std::string_view(readResult.buffer, readResult.bytesRead) << std::endl;
-        return new IncrementFuture(10, 0); });
+        return new Future<DoneFuture>(DoneFuture()); });
+
+    Future<DecrementFuture> *decrementFuture = new Future<DecrementFuture>(DecrementFuture(0, 10));
+    Future<IncrementFuture> *incrementFuture2 = new Future<IncrementFuture>(IncrementFuture(10, 0));
+
+    decrementFuture->Then<Future<DoneFuture>>([](DecrementFuture::DataType value)
+                                              { std::cerr << " Decrement future completed with value: " << value << std::endl;
+                        return new Future<DoneFuture>(DoneFuture()); });
+    incrementFuture2->Then<Future<DoneFuture>>([](IncrementFuture::DataType value)
+                                               { std::cerr << " Increment future completed with value: " << value << std::endl;
+                        return new Future<DoneFuture>(DoneFuture()); });
 
     std::cerr << "Futures registered with runtime = " << runtime.size() << std::endl;
     std::set<int> removedIndecies;
