@@ -349,14 +349,10 @@ int main()
 
     std::cerr << "Futures registered with runtime = " << runtime.size() << std::endl;
     std::set<int> removedIndecies;
-    while (removedIndecies.size() < runtime.size())
+    while (!runtime.empty())
     {
         for (unsigned int i = 0; i < runtime.size(); ++i)
         {
-            if (removedIndecies.find(i) != removedIndecies.end())
-            {
-                continue;
-            }
             auto pollResult = runtime[i]->Poll();
             if (pollResult == PollStatus::Finished || pollResult == PollStatus::Error)
             {
@@ -364,5 +360,12 @@ int main()
                 removedIndecies.insert(i);
             }
         }
+        for (auto it = removedIndecies.rbegin(); it != removedIndecies.rend(); ++it)
+        {
+            auto index = *it;
+            delete runtime[index];
+            runtime.erase(runtime.begin() + index);
+        }
+        removedIndecies.clear();
     }
 }
